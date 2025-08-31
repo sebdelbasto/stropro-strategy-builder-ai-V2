@@ -3,6 +3,7 @@ const RAW = process.env.STROPRO_API_KEY || ''
 const AUTH = RAW ? (RAW.startsWith('Bearer ') ? RAW : `Bearer ${RAW}`) : ''
 
 type AnyObj = Record<string, any>
+
 export type NormProduct = {
   id?: string
   name?: string
@@ -17,13 +18,11 @@ export type NormProduct = {
 const cache = new Map<string,{t:number, ttl:number, v:any}>()
 const TTL = 10*60*1000
 const now = () => Date.now()
-function getC(key:string){ const h = cache.get(key); if (h && now()-h.t < h.ttl) return h.v; if (h) cache.delete(key); }
+function getC(key:string){ const h = cache.get(key); if (h && now()-h.t < h.ttl) return h.v; if (h) cache.delete(key) }
 function setC(key:string, v:any, ttl=TTL){ cache.set(key, {t:now(), ttl, v}) }
 
 async function apiGet(path:string, params?:AnyObj) {
   if (!BASE || !AUTH) throw new Error('Missing STROPRO_API_BASE or STROPRO_API_KEY')
-  // If BASE already ends with /api, ensure we don't duplicate it
-  // e.g., BASE=https://portal.stropro.com/api and path='api/products' -> 'products'
   const cleaned = path.replace(/^\/?api\//, '').replace(/^\//,'')
   const url = new URL(cleaned, BASE.endsWith('/') ? BASE : BASE + '/')
   if (params) Object.entries(params).forEach(([k,v])=>{
@@ -31,7 +30,11 @@ async function apiGet(path:string, params?:AnyObj) {
   })
   const ck = `GET ${url}`
   const hit = getC(ck); if (hit) return hit
-  const r = await fetch(url.toString(), { method:'GET', headers:{ Accept:'application/json', Authorization: AUTH }, next:{ revalidate:600 } })
+  const r = await fetch(url.toString(), {
+    method:'GET',
+    headers:{ Accept:'application/json', Authorization: AUTH },
+    next:{ revalidate:600 }
+  })
   if (!r.ok) {
     const txt = await r.text().catch(()=> '')
     throw new Error(`Platform ${url.pathname} ${r.status}: ${txt.slice(0,200)}`)
@@ -58,7 +61,7 @@ function monthsFromTenor(x:any): number | undefined {
   if (typeof x === 'number' && isFinite(x)) return x
   if (typeof x === 'string') {
     const m = x.match(/(\d+(?:\.\d+)*)\s*(m|months?)/i); if (m) return Math.round(parseFloat(m[1]))
-    const y = x.match(/(\d+(?:\.\d+)*)\s*(y|years?)/i); if (y) return Math.round(parseFloat(y[1]) * 12)
+    const y = x.match(/(\d+(?:\.\d+)*)\s*(y|years?)/i);  if (y) return Math.round(parseFloat(y[1]) * 12)
     const n = Number(x); if (isFinite(n)) return n
   }
   return undefined
@@ -71,8 +74,7 @@ function normUnderliers(u:any): string[] {
 
 export function normalizeProduct(p:any): NormProduct {
   const createdAt = new Date(p.createdAt || p.issueDate || p.updatedAt || Date.now()).getTime()
-  const couponPct = parsePct(p.couponPct) ?? parsePct(p.coupon_pa) ?? parsePct(p.coupon) ??
-                    parsePct(p.yield) ?? fromTextPct(p.title, p.name, p.description)
+  const couponPct = parsePct(p.couponPct) ?? parsePct(p.coupon_pa) ?? parsePct(p.coupon) ?? parsePct(p.yield) ?? fromTextPct(p.title, p.name, p.description)
   const tenorMonths = monthsFromTenor(p.tenor || p.tenorMonths || p.term || p.maturity)
   const underliers = normUnderliers(p.underliers || p.underlying || p.underlyingAssets || p.assets)
   const typeText = [p.productType, p.type, p.category, p.family, p.name, p.title].filter(Boolean).join(' ')
@@ -106,8 +108,23 @@ const OBJ_FAMILIES: Record<string,RegExp[]> = {
   'Enhanced Income': [/fixed coupon|autocall|snowball|income|smart[-\s]?entry/i],
   'Capital Preservation': [/principal protected|capital protected|ppn|hedge/i],
   'Growth': [/enhanced growth|leveraged call|discount[-\s]?entry|participation/i],
-  'Tax-Effective': [/limited recourse loan|lrl|enhanced growth via lrl/i],
+  'Tax-Effective': [/limited recourse loan|lrl|protected equity loan/i],
   'Equity Release': [/option.*loan|equity release/i],
+}
+
+export function familyForType(typeText: string): string | undefined {
+  const t = (typeText || '').toLowerCase()
+  if (!t) return undefined
+  if (/smart[-\s]?entry/.test(t)) return "Smart-Entry Note"
+  if (/(fixed coupon|autocall|snowball|income)/.test(t)) return "Fixed Coupon Note"
+  if (/discount[-\s]?entry/.test(t)) return "Discount-Entry Note"
+  if (/(principal protected|capital protected|ppn)/.test(t)) return "Principal Protected Note"
+  if (/(protected equity loan)/.test(t)) return "Protected Equity Loan"
+  if (/(option.*loan|equity release|facility)/.test(t)) return "Option & Loan Facility"
+  if (/hedge|collar|put|protection(?!.*principal)/.test(t)) return "Hedging"
+  if (/enhanced growth|lookback|excess return|futures|er index/.test(t)) return "Enhanced Growth (ER/Lookback)"
+  if (/(limited recourse loan|lrl)/.test(t)) return "Enhanced Growth via Limited Recourse Loan (LRL)"
+  return undefined
 }
 
 function scoreSimilarity(p:NormProduct, target:{ objective:string, underliers:string[], tenor:number, currency:string }) {
@@ -151,7 +168,16 @@ export function bandFromProducts(arr:NormProduct[]) {
   const p25i = Math.floor(0.25*(n-1)), p75i = Math.floor(0.75*(n-1))
   const p25 = vals[p25i], p75 = vals[p75i]
   const band = n>=4 ? `${p25.toFixed(1)}–${p75.toFixed(1)}% p.a. (illustrative only)`
-           : n>=2 ? `${vals[0].toFixed(1)}–${vals[n-1].toFixed(1)}% p.a. (illustrative only)`
-           : `${(vals[0]-1).toFixed(1)}–${(vals[0]+1).toFixed(1)}% p.a. (illustrative only)`
+                    : n>=2 ? `${vals[0].toFixed(1)}–${vals[n-1].toFixed(1)}% p.a. (illustrative only)`
+                           : `${(vals[0]-1).toFixed(1)}–${(vals[0]+1).toFixed(1)}% p.a. (illustrative only)`
   return { band, sampleSize: n }
+}
+
+/** narrower cohort: also require inferred family match (when provided) */
+export function cohortByFamily(products: NormProduct[], target: {
+  objective: string, underliers: string[], tenor: number, currency: string, family?: string
+}) {
+  const base = selectSimilar(products, target, 250)
+  if (!target.family) return base
+  return base.filter(p => familyForType(p.type || '') === target.family)
 }

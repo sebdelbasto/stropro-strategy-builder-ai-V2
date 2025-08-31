@@ -7,7 +7,6 @@ export const Objectives = [
   'Equity Release',
   'Tax-Effective',
 ] as const
-
 export type Objective = typeof Objectives[number]
 
 export const InputSchema = z.object({
@@ -19,7 +18,6 @@ export const InputSchema = z.object({
   notes: z.string().optional(),
   investorTypeConfirmed: z.boolean().optional(),
 })
-
 export type WizardInputs = z.infer<typeof InputSchema>
 
 export type Suggestion = {
@@ -28,6 +26,9 @@ export type Suggestion = {
   indicativeCoupon?: string
   articleUrl?: string
   parameters: Record<string, string | number>
+  mechanics?: Record<string,string>
+  evidenceCount?: number
+  flags?: string[]
 }
 
 export type PriceRequest = {
