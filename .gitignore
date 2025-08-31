@@ -1,0 +1,15 @@
+# Node / Next
+node_modules
+.next
+out
+dist
+*.log
+
+# Env files
+.env
+.env.*.local
+.env.local
+
+# OS / editor junk
+.DS_Store
+*.swp
