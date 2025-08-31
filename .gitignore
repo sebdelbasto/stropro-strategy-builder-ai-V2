@@ -13,3 +13,8 @@ dist
 # OS / editor junk
 .DS_Store
 *.swp
+
+# local backups
+*.bak*
+*.backup*
+.bak/
