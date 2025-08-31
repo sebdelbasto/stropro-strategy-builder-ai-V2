@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server'
 import { MODEL, OPENAI_KEY } from '@/lib/ai'
-import { isAllowedUserQuestion, WHOLESALE_NOTICE } from '@/lib/policy'
+import { isAllowedUserQuestion, WHOLESALE_NOTICE, CHAT_SYSTEM_PROMPT } from '@/lib/policy'
 
 export const runtime = 'nodejs'
 
 const MAX_TURNS = Number(process.env.MAX_CHAT_TURNS || 6)
 const COOLDOWN_MS = Number(process.env.CHAT_COOLDOWN_MS || 8000)
 
-// Super simple in-memory throttle (per lambda instance)
 const ipBuckets = new Map<string,{count:number,ts:number}>()
 
 export async function POST(req: Request) {
@@ -28,7 +27,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'bad_request' }, { status: 400 })
     }
 
-    // Enforce turn limit
     if (messages.length > MAX_TURNS) {
       return NextResponse.json({
         done: true,
@@ -36,7 +34,6 @@ export async function POST(req: Request) {
       })
     }
 
-    // Enforce cooldown
     if (typeof lastAt === 'number') {
       const elapsed = Date.now() - lastAt
       if (elapsed < COOLDOWN_MS) {
@@ -72,8 +69,8 @@ export async function POST(req: Request) {
         model: MODEL,
         temperature: 0.4,
         messages: [
-          { role: 'system', content: "You are a concise, compliant structured-products helper. Refuse off-topic. Append: 'Educational; wholesale only.'" },
-          ...messages.slice(-6) // cap context
+          { role: 'system', content: CHAT_SYSTEM_PROMPT },
+          ...messages.slice(-6)
         ],
       })
     })
