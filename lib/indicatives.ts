@@ -102,7 +102,7 @@ const BASE: Record<Family, Record<string, Record<string,string>>> = {
     "37–60":{ AUD: "Participation ~1.5–2.2× (illustrative only)", USD: "1.5–2.2×", EUR: "1.4–2.0×" },
     ">60":  { AUD: "Participation ~1.6–2.3× (illustrative only)", USD: "1.6–2.3×", EUR: "1.5–2.1×" }
   },
-  "Enhanced Growth via Limited Recourse Loan (LRL)": {
+  "Lending (LRL)": {
     "≤12":  { AUD: "Outlay ~3–6% of notional (illustrative only)", USD: "3–6%", EUR: "3–6%" },
     "13–24":{ AUD: "Outlay ~6–12% of notional (illustrative only)", USD: "6–12%", EUR: "6–12%" },
     "25–36":{ AUD: "Outlay ~9–18% of notional (illustrative only)", USD: "9–18%", EUR: "9–18%" },

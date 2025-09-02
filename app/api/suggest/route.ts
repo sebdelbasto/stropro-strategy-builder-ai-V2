@@ -1,10 +1,35 @@
+import { defaultMechanics } from '@/lib/families'
+import { getFamilyExplainer } from '@/lib/familyExplainers'
 import { NextResponse } from 'next/server'
 import { MODEL, OPENAI_KEY, buildPrompt, articleForObjective } from '@/lib/ai'
+// below line added
+import { FAMILY_ARTICLES } from '@/lib/ai'
 import { fetchRecentProducts, selectSimilar, bandFromProducts, cohortByFamily } from '@/lib/catalog'
-import { FAMILY_BY_OBJECTIVE, FAMILY_ARTICLE, FAMILY_EXPLAINER, Family, defaultMechanics } from '@/lib/families'
+import { FAMILY_BY_OBJECTIVE, Family } from '@/lib/families'
 import { computeIndicativeBand, illiquidHint } from '@/lib/indicatives'
 
+function cleanMechanics(obj: any): Record<string,string> {
+  const out: Record<string,string> = {}
+  if (obj && typeof obj === 'object') {
+    for (const k of Object.keys(obj)) {
+      const v = (obj as any)[k]
+      if (typeof v === 'string' && v) out[k] = v
+    }
+  }
+  return out
+}
+
 export const runtime = 'nodejs'
+
+function sanitizeMechanics(m: any): Record<string, string> | undefined {
+  if (!m || typeof m !== 'object') return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(m)) {
+    if (typeof v === 'string' && v.trim()) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 
 type IdeaOut = {
   title: string
@@ -18,31 +43,27 @@ type IdeaOut = {
 }
 
 function localIdeas(inputs:any, broadBand?:string, perFamily?:Record<string,string|undefined>, perCount?:Record<string,number>): IdeaOut[] {
-  const families = (FAMILY_BY_OBJECTIVE[inputs.objective] || []).slice(0,3)
-  const flags:string[] = []
-  const illq = illiquidHint(inputs.underliers||[])
+  // Keep this simple for prod build: pick primary family from objective
+  const families: Family[] = ((FAMILY_BY_OBJECTIVE as any)[inputs.objective] || ['Fixed Coupon Note']).slice(0,2)
+
+  const flags: string[] = []
+  const illq = illiquidHint(inputs.underliers || [])
   if (illq) flags.push(illq)
 
   return families.map((fam:Family, i:number) => ({
     title: `${fam}: Idea ${i+1}`,
-    explainer: `${FAMILY_EXPLAINER[fam]} For licensed advisers/wholesale; educational only; terms & KIDs prevail.`,
-    articleUrl: FAMILY_ARTICLE[fam] || articleForObjective(inputs.objective),
-    indicativeCoupon: computeIndicativeBand({
-      family: fam,
-      tenorMonths: inputs.tenorMonths,
-      currency: inputs.investmentCurrency,
-      underliers: inputs.underliers || [],
-      platformBand: (perFamily && perFamily[fam]) || broadBand
-    }),
+    explainer: `${(getFamilyExplainer(fam)?.what?.[0] || 'Short explainer unavailable')}. For licensed advisers/wholesale; educational only; terms & KIDs prevail.`,
+    articleUrl: FAMILY_ARTICLES[fam] || articleForObjective(inputs.objective),
+    indicativeCoupon: broadBand,
     parameters: {
-      Tenor: `${inputs.tenorMonths}m`,
+      Tenor: inputs.tenorMonths ? `${inputs.tenorMonths}m` : '—',
       Risk: inputs.riskProfile,
       Currency: inputs.investmentCurrency,
-      Underliers: (inputs.underliers||[]).join(', ')
+      Underliers: (inputs.underliers || []).join(', ') || '—',
     },
-    mechanics: defaultMechanics(fam),
+    mechanics: sanitizeMechanics(cleanMechanics(defaultMechanics(fam, inputs))),
     evidenceCount: perCount?.[fam],
-    flags: flags.length ? flags : undefined
+    flags: flags.length ? flags : undefined,
   }))
 }
 
@@ -69,7 +90,7 @@ export async function POST(req: Request) {
     broadBand = agg.band
     broadCount = agg.sampleSize
 
-    const prefs = (FAMILY_BY_OBJECTIVE[inputs.objective] || []).slice(0,3)
+    const prefs = ((FAMILY_BY_OBJECTIVE as any)[inputs.objective] || []).slice(0,2)
     for (const fam of prefs) {
       const famCohort = cohortByFamily(recents, {
         objective: inputs.objective,
@@ -127,18 +148,18 @@ export async function POST(req: Request) {
       })
     }
 
-    const families = (FAMILY_BY_OBJECTIVE[inputs.objective] || []).slice(0,3) as Family[]
+    const families = ((FAMILY_BY_OBJECTIVE as any)[inputs.objective] || []).slice(0,2) as Family[]
     const arr = Array.isArray(parsed?.suggestions) ? (parsed.suggestions as any[]) : []
     const illq = illiquidHint(inputs.underliers||[])
     const flags:string[] = illq ? [illq] : []
 
     const suggestions: IdeaOut[] = (arr.length ? arr : families.map((fam, i) => ({
       title: `${fam}: Idea ${i+1}`,
-      explainer: FAMILY_EXPLAINER[fam],
-      articleUrl: FAMILY_ARTICLE[fam],
+      explainer: (getFamilyExplainer(fam)?.what?.[0] || 'Short explainer unavailable'),
+      articleUrl: FAMILY_ARTICLES[fam],
       parameters: undefined
     })))
-    .slice(0,3)
+    .slice(0,2)
     .map((s:any, idx:number) => {
       const fam = families[idx] || undefined
       const title = s?.title && String(s.title).trim()
@@ -146,10 +167,10 @@ export async function POST(req: Request) {
         : (fam ? `${fam}: Idea ${idx+1}` : `${inputs.objective}: Idea ${idx+1}`)
       const articleUrl = s?.articleUrl && String(s.articleUrl).startsWith('http')
         ? s.articleUrl
-        : (fam ? FAMILY_ARTICLE[fam] : (s?.articleUrl || ''))
+        : (fam ? FAMILY_ARTICLES[fam] : (s?.articleUrl || ''))
       const explainerBase = s?.explainer && String(s.explainer).trim()
         ? String(s.explainer).trim()
-        : (fam ? FAMILY_EXPLAINER[fam] : 'Illustrative structure.')
+        : (fam ? (getFamilyExplainer(fam)?.what?.[0] || 'Short explainer unavailable') : 'Illustrative structure.')
       const explainer = flags.length ? `${explainerBase} ${flags.join(' ')}` : `${explainerBase} For licensed advisers/wholesale; educational only; terms & KIDs prevail.`
       const indicativeCoupon = fam ? computeIndicativeBand({
         family: fam,
@@ -174,7 +195,7 @@ export async function POST(req: Request) {
         indicativeCoupon,
         articleUrl,
         parameters,
-        mechanics: fam ? defaultMechanics(fam) : undefined,
+        mechanics: fam ? defaultMechanics(fam, inputs) : undefined,
         evidenceCount: fam ? (countsByFamily[fam] ?? undefined) : undefined,
         flags: flags.length ? flags : undefined
       }

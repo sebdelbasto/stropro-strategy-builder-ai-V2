@@ -18,3 +18,4 @@ dist
 *.bak*
 *.backup*
 .bak/
+.vercel

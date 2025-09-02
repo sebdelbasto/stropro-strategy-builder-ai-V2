@@ -46,8 +46,11 @@ export default function StrategyWizard({ embedMode }: { embedMode?: boolean }) {
   const [peekRows, setPeekRows] = useState<Array<any>>([])
   const [peekBand, setPeekBand] = useState<string | undefined>()
 
+  // Buffer so you can type commas/spaces naturally
+  const [underliersRaw, setUnderliersRaw] = useState<string>(DEFAULTS.underliers.join(', '))
+
   const canGenerate = useMemo(
-    () => !!inputs.objective && inputs.tenorMonths >= 3 && inputs.underliers.length > 0,
+    () => !!inputs.objective && inputs.tenorMonths >= 3 && (inputs.underliers?.length ?? 0) > 0,
     [inputs]
   )
 
@@ -80,35 +83,50 @@ export default function StrategyWizard({ embedMode }: { embedMode?: boolean }) {
     }
   }
 
+  // Parse the buffer -> canonical array
+  function parseUnderliers(raw: string): string[] {
+    return raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+
   async function generateIdeas() {
+    // Ensure underliers are synced even if the input hasn't blurred
+    const parsed = parseUnderliers(underliersRaw)
+    const nextInputs: WizardInputs = { ...inputs, underliers: parsed }
+    setInputs(nextInputs)
+
     setLoading(true)
     pushUser(
-      `Generate ${inputs.objective} ideas for ${inputs.underliers.join(', ')} over ${
-        inputs.tenorMonths
-      }m (${inputs.riskProfile}, ${inputs.investmentCurrency}). Notes: ${inputs.notes || '—'}`
+      `Generate ${nextInputs.objective} ideas for ${nextInputs.underliers.join(', ')} over ${
+        nextInputs.tenorMonths
+      }m (${nextInputs.riskProfile}, ${nextInputs.investmentCurrency}). Notes: ${
+        nextInputs.notes || '—'
+      }`
     )
     try {
       const r = await fetch('/api/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(inputs),
+        body: JSON.stringify(nextInputs),
       })
 
       if (!r.ok) {
         setSampleSize(0)
-        const years = Math.round((inputs.tenorMonths / 12) * 10) / 10
+        const years = Math.round((nextInputs.tenorMonths / 12) * 10) / 10
         const list: Suggestion[] = [
           {
-            title: `${inputs.objective}: Base Idea`,
-            explainer: `Illustrative ${inputs.objective.toLowerCase()} structure over ${years} years on ${inputs.underliers.join(
+            title: `${nextInputs.objective}: Base Idea`,
+            explainer: `Illustrative ${nextInputs.objective.toLowerCase()} structure over ${years} years on ${nextInputs.underliers.join(
               ', '
-            )}. Tuned to ${inputs.riskProfile} in ${inputs.investmentCurrency}.`,
+            )}. Tuned to ${nextInputs.riskProfile} in ${nextInputs.investmentCurrency}.`,
             articleUrl: DEFAULT_ARTICLE,
             parameters: {
-              Tenor: `${inputs.tenorMonths}m`,
-              Risk: inputs.riskProfile,
-              Currency: inputs.investmentCurrency,
-              Underliers: inputs.underliers.join(', '),
+              Tenor: `${nextInputs.tenorMonths}m`,
+              Risk: nextInputs.riskProfile,
+              Currency: nextInputs.investmentCurrency,
+              Underliers: nextInputs.underliers.join(', '),
             },
           },
         ]
@@ -131,19 +149,19 @@ export default function StrategyWizard({ embedMode }: { embedMode?: boolean }) {
       setStep(2)
     } catch {
       setSampleSize(0)
-      const years = Math.round((inputs.tenorMonths / 12) * 10) / 10
+      const years = Math.round((nextInputs.tenorMonths / 12) * 10) / 10
       const list: Suggestion[] = [
         {
-          title: `${inputs.objective}: Base Idea`,
-          explainer: `Illustrative ${inputs.objective.toLowerCase()} structure over ${years} years on ${inputs.underliers.join(
+          title: `${nextInputs.objective}: Base Idea`,
+          explainer: `Illustrative ${nextInputs.objective.toLowerCase()} structure over ${years} years on ${nextInputs.underliers.join(
             ', '
-          )}. Tuned to ${inputs.riskProfile} in ${inputs.investmentCurrency}.`,
+          )}. Tuned to ${nextInputs.riskProfile} in ${nextInputs.investmentCurrency}.`,
           articleUrl: DEFAULT_ARTICLE,
           parameters: {
-            Tenor: `${inputs.tenorMonths}m`,
-            Risk: inputs.riskProfile,
-            Currency: inputs.investmentCurrency,
-            Underliers: inputs.underliers.join(', '),
+            Tenor: `${nextInputs.tenorMonths}m`,
+            Risk: nextInputs.riskProfile,
+            Currency: nextInputs.investmentCurrency,
+            Underliers: nextInputs.underliers.join(', '),
           },
         },
       ]
@@ -244,7 +262,15 @@ export default function StrategyWizard({ embedMode }: { embedMode?: boolean }) {
           </div>
           <div className="flex items-center justify-between">
             <div className="small">Educational demo – wholesale clients only</div>
-            <button type="button" className="btn-primary" onClick={() => setStep(1)}>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                // keep buffer in sync when moving steps
+                setUnderliersRaw(inputs.underliers.join(', '))
+                setStep(1)
+              }}
+            >
               Next
             </button>
           </div>
@@ -292,21 +318,32 @@ export default function StrategyWizard({ embedMode }: { embedMode?: boolean }) {
                 <option>EUR</option>
               </select>
             </div>
+
             <div>
-              <label className="label">
-                Underliers (comma separated – e.g., SPX, SX5E, AAPL)
-              </label>
+              <label className="label">Underliers (e.g., SPX, SX5E, AAPL)</label>
               <input
+                type="text"
+                inputMode="text"
+                autoComplete="off"
                 className="input"
-                value={inputs.underliers.join(', ')}
-                onChange={(e) =>
+                placeholder="e.g. SPX, SX5E, AAPL"
+                value={underliersRaw}
+                onChange={(e) => setUnderliersRaw(e.target.value)}
+                onBlur={() =>
                   setInputs((v) => ({
                     ...v,
-                    underliers: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                    underliers: parseUnderliers(underliersRaw),
                   }))
                 }
+                onKeyDownCapture={(e) => {
+                  if (e.key === ',' || e.key === ' ') e.stopPropagation()
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur()
+                }}
               />
             </div>
+
             <div className="md:col-span-2">
               <label className="label">Thesis / notes (optional)</label>
               <textarea
@@ -364,7 +401,7 @@ export default function StrategyWizard({ embedMode }: { embedMode?: boolean }) {
               {suggestions.map((s, idx) => {
                 // Compute explainer link from detected family if no valid articleUrl
                 const family = detectFamilyFromTitle(s.title, inputs.objective)
-const link = articleForFamily(family, DEFAULT_ARTICLE)
+                const link = articleForFamily(family, DEFAULT_ARTICLE)
 
                 return (
                   <div
